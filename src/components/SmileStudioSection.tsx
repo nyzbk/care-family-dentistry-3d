@@ -92,7 +92,7 @@ export const SmileStudioSection: React.FC<SmileStudioProps> = ({ onOpenModal }) 
 
               {/* Vertical Slider Handle Line */}
               <div
-                className="absolute top-0 bottom-0 w-1 bg-white shadow-[0_0_10px_rgba(0,0,0,0.5)] flex items-center justify-center pointer-events-none"
+                className="absolute top-0 bottom-0 w-1 bg-white shadow-md flex items-center justify-center pointer-events-none"
                 style={{ left: `${sliderPos}%` }}
               >
                 <div className="w-8 h-8 rounded-full bg-white text-[#c06c52] shadow-lg flex items-center justify-center font-bold text-xs border border-[#eee3d5]">
