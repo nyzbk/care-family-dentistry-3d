@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-ssr
+*.local
+assets/temp*
+assets/clips
+assets/*.mp4
+.vercel
