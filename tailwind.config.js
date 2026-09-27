@@ -17,6 +17,16 @@ export default {
         sans: ['"Plus Jakarta Sans"', 'Inter', 'sans-serif'],
         display: ['"Plus Jakarta Sans"', 'sans-serif'],
         body: ['Inter', 'sans-serif'],
+        serif: ['Fraunces', 'Georgia', 'serif'],
+      },
+      animation: {
+        marquee: 'marquee 28s linear infinite',
+      },
+      keyframes: {
+        marquee: {
+          '0%': { transform: 'translateX(0%)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
       },
     },
   },

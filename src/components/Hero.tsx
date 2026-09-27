@@ -1,211 +1,322 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Calendar, ArrowRight } from 'lucide-react';
+import { ArrowRight, ShieldCheck, Clock } from 'lucide-react';
 
-interface HeroProps {
-  totalFrames?: number;
-}
+const FRAME_COUNT = 240;
 
-export const Hero: React.FC<HeroProps> = ({ totalFrames = 60 }) => {
+export const Hero: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [images, setImages] = useState<HTMLImageElement[]>([]);
-  const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
+  const imagesRef = useRef<HTMLImageElement[]>([]);
+  const [firstFrameReady, setFirstFrameReady] = useState(false);
+  const [currentProgress, setCurrentProgress] = useState(0);
 
-  // Preload frames in non-blocking background queue
+  // Magnetic button refs
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const buttonInnerRef = useRef<HTMLSpanElement>(null);
+
+  // Preload images: frame 1 first, rest in batches of 10
   useEffect(() => {
-    const loadedImages: HTMLImageElement[] = new Array(totalFrames);
-    let loadedCount = 0;
+    const imageArray: HTMLImageElement[] = new Array(FRAME_COUNT);
 
-    // Load frame 1 first for instant paint
-    const firstImg = new Image();
-    firstImg.src = '/frames/frame_0001.webp';
-    firstImg.onload = () => {
-      loadedImages[0] = firstImg;
-      loadedCount++;
-      // Draw first frame immediately
+    const loadImage = (i: number): Promise<void> => {
+      return new Promise((resolve) => {
+        const img = new Image();
+        const frameNum = String(i + 1).padStart(4, '0');
+        img.src = `/frames/frame_${frameNum}.webp`;
+        img.onload = () => {
+          imageArray[i] = img;
+          if (i === 0) {
+            imagesRef.current = imageArray;
+            setFirstFrameReady(true);
+          }
+          resolve();
+        };
+        img.onerror = () => {
+          resolve();
+        };
+      });
+    };
+
+    const loadAll = async () => {
+      await loadImage(0);
+      const batchSize = 10;
+      for (let batch = 1; batch < FRAME_COUNT; batch += batchSize) {
+        const promises: Promise<void>[] = [];
+        for (let i = batch; i < Math.min(batch + batchSize, FRAME_COUNT); i++) {
+          promises.push(loadImage(i));
+        }
+        await Promise.all(promises);
+        imagesRef.current = [...imageArray];
+      }
+    };
+
+    loadAll();
+  }, []);
+
+  // Resize canvas to window dimensions
+  useEffect(() => {
+    const handleResize = () => {
+      if (canvasRef.current) {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvasRef.current.width = window.innerWidth * dpr;
+        canvasRef.current.height = window.innerHeight * dpr;
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Render loop with spring smoothing (stiffness: 100, damping: 30)
+  useEffect(() => {
+    if (!firstFrameReady) return;
+
+    let animId: number;
+    let targetProgress = 0;
+    let smoothProgress = 0;
+    let lastRenderedIndex = -1;
+
+    const onScroll = () => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const totalScroll = containerRef.current.offsetHeight - window.innerHeight;
+      const p = Math.min(Math.max(-rect.top / totalScroll, 0), 1);
+      targetProgress = p;
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+
+    const render = () => {
+      // Spring lerp interpolation
+      smoothProgress += (targetProgress - smoothProgress) * 0.085;
+      setCurrentProgress(smoothProgress);
+
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(firstImg, 0, 0, canvas.width, canvas.height);
+          const rawIndex = smoothProgress * (FRAME_COUNT - 1);
+          const index = Math.min(Math.max(Math.round(rawIndex), 0), FRAME_COUNT - 1);
+
+          if (index !== lastRenderedIndex) {
+            let img = imagesRef.current[index];
+            if (!img) {
+              // Nearest loaded frame fallback
+              for (let offset = 1; offset < FRAME_COUNT; offset++) {
+                if (imagesRef.current[index - offset]) {
+                  img = imagesRef.current[index - offset];
+                  break;
+                }
+                if (imagesRef.current[index + offset]) {
+                  img = imagesRef.current[index + offset];
+                  break;
+                }
+              }
+            }
+
+            if (img) {
+              const cw = canvas.width;
+              const ch = canvas.height;
+              const iw = img.width;
+              const ih = img.height;
+
+              // COVER algorithm: fills entire viewport seamlessly
+              const scale = Math.max(cw / iw, ch / ih);
+              const dw = iw * scale;
+              const dh = ih * scale;
+              const ox = (cw - dw) / 2;
+              const oy = (ch - dh) / 2;
+
+              ctx.clearRect(0, 0, cw, ch);
+              ctx.drawImage(img, ox, oy, dw, dh);
+              lastRenderedIndex = index;
+            }
+          }
         }
       }
 
-      // Load remaining frames asynchronously
-      for (let i = 2; i <= totalFrames; i++) {
-        const img = new Image();
-        const frameNum = String(i).padStart(4, '0');
-        img.src = `/frames/frame_${frameNum}.webp`;
-        img.onload = () => {
-          loadedImages[i - 1] = img;
-          loadedCount++;
-          if (loadedCount === totalFrames) {
-            setImages(loadedImages);
-          }
-        };
-      }
-    };
-  }, [totalFrames]);
-
-  // Scrub frames on scroll
-  useEffect(() => {
-    let animationFrameId: number;
-
-    const handleScroll = () => {
-      if (!containerRef.current || !canvasRef.current) return;
-
-      const rect = containerRef.current.getBoundingClientRect();
-      const scrollHeight = containerRef.current.offsetHeight - window.innerHeight;
-      const scrolled = -rect.top;
-      const progress = Math.min(Math.max(scrolled / scrollHeight, 0), 1);
-
-      const frameIndex = Math.min(
-        Math.floor(progress * totalFrames),
-        totalFrames - 1
-      );
-
-      setCurrentFrameIndex(frameIndex);
-
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      if (ctx && images[frameIndex]) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(images[frameIndex], 0, 0, canvas.width, canvas.height);
-      }
+      animId = requestAnimationFrame(render);
     };
 
-    const onScroll = () => {
-      cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(handleScroll);
-    };
+    render();
 
-    window.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       window.removeEventListener('scroll', onScroll);
-      cancelAnimationFrame(animationFrameId);
+      cancelAnimationFrame(animId);
     };
-  }, [images, totalFrames]);
+  }, [firstFrameReady]);
 
-  // Phase calculation
-  const progressRatio = currentFrameIndex / (totalFrames - 1);
+  // Magnetic button physics
+  useEffect(() => {
+    const btn = buttonRef.current;
+    const inner = buttonInnerRef.current;
+    if (!btn || !inner) return;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = btn.getBoundingClientRect();
+      const dx = e.clientX - (rect.left + rect.width / 2);
+      const dy = e.clientY - (rect.top + rect.height / 2);
+      btn.style.transform = `translate3d(${dx * 0.32}px, ${dy * 0.45}px, 0)`;
+      inner.style.transform = `translate3d(${dx * 0.15}px, ${dy * 0.20}px, 0)`;
+    };
+
+    const onMouseLeave = () => {
+      btn.style.transform = 'translate3d(0, 0, 0)';
+      inner.style.transform = 'translate3d(0, 0, 0)';
+    };
+
+    btn.addEventListener('mousemove', onMouseMove);
+    btn.addEventListener('mouseleave', onMouseLeave);
+
+    return () => {
+      btn.removeEventListener('mousemove', onMouseMove);
+      btn.removeEventListener('mouseleave', onMouseLeave);
+    };
+  }, []);
+
+  // Opacity helper for 4 text stages
+  const getStageOpacity = (start: number, end: number) => {
+    if (currentProgress < start || currentProgress > end) return 0;
+    const midStart = start + 0.05;
+    const midEnd = end - 0.05;
+    if (currentProgress < midStart) return (currentProgress - start) / 0.05;
+    if (currentProgress > midEnd) return (end - currentProgress) / 0.05;
+    return 1;
+  };
 
   return (
-    <section id="hero" ref={containerRef} className="relative h-[280vh] bg-cf-alabaster">
-      {/* Sticky Viewport */}
-      <div className="sticky top-0 h-screen w-full overflow-hidden flex flex-col justify-between">
-        {/* Background Visual Canvas */}
-        <canvas
-          ref={canvasRef}
-          width={1920}
-          height={1080}
-          className="absolute inset-0 w-full h-full object-cover z-0 filter brightness-[0.98] contrast-[1.02]"
-        />
+    <section ref={containerRef} className="relative w-full h-[400vh] bg-[#FAF9F6] selection:bg-[#489987]/20">
+      {/* Sticky 100vh Viewport */}
+      <div className="sticky top-0 w-full h-screen overflow-hidden flex flex-col justify-between">
+        {/* Fullscreen Canvas */}
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-cover" />
 
-        {/* Ambient Subtle Vignette for Typographic Readability */}
-        <div className="absolute inset-0 bg-gradient-to-t from-cf-alabaster/90 via-transparent to-cf-forest/20 pointer-events-none z-10" />
+        {/* 12-Column Architectural Hairline Grid Overlay */}
+        <div className="pointer-events-none absolute inset-0 hidden md:block opacity-[0.04]">
+          <div className="mx-auto max-w-[1440px] h-full px-10 grid grid-cols-12 gap-6">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="border-l border-[#1E3A34] last:border-r h-full" />
+            ))}
+          </div>
+        </div>
 
-        {/* Top Space Reservation for Nav */}
-        <div className="relative z-20 pt-28 px-6 max-w-7xl mx-auto w-full pointer-events-none" />
+        {/* Gradient Vignette for Readability */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#FAF9F6] via-transparent to-[#FAF9F6]/40" />
 
-        {/* Pure Architectural Monograph Typography (Kinfolk / Aman Style) */}
-        <div className="relative z-20 px-6 max-w-3xl mx-auto w-full text-center pb-8 flex-1 flex flex-col justify-center pointer-events-none">
-          {/* Phase 1: Atrium Entrance (0% - 34%) */}
-          <div
-            className={`transition-all duration-700 transform ${
-              progressRatio < 0.35
-                ? 'opacity-100 translate-y-0'
-                : 'opacity-0 -translate-y-6 pointer-events-none absolute'
-            }`}
-          >
-            <div className="bg-cf-alabaster/80 backdrop-blur-md px-6 py-6 sm:px-10 sm:py-8 rounded-3xl border border-cf-mist/80 shadow-sm inline-block max-w-xl mx-auto pointer-events-auto">
-              <span className="block text-xs uppercase tracking-[0.25em] font-semibold text-cf-gold mb-2 font-body">
-                Bixby &bull; South Tulsa Dental Sanctuary
-              </span>
-              <h1 className="text-3xl sm:text-4xl md:text-5xl font-display font-semibold text-cf-forest tracking-tight leading-[1.15]">
-                Dentistry designed to <br className="hidden sm:inline" />
-                <span>dissolve dental fear.</span>
-              </h1>
-              <p className="mt-3 text-sm sm:text-base text-cf-slate max-w-md mx-auto font-normal font-body leading-relaxed">
-                Warm Scandinavian white oak, peaceful garden suites, and unhurried care from three resident women doctors in Bixby.
-              </p>
-            </div>
+        {/* Top Bar Telemetry */}
+        <div className="relative z-20 mx-auto max-w-[1440px] w-full px-6 md:px-10 pt-24 flex items-center justify-between pointer-events-none">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#1E3A34]/5 backdrop-blur-md border border-[#1E3A34]/10 text-[11px] font-sans font-medium text-[#1E3A34]">
+            <span className="w-2 h-2 rounded-full bg-[#489987] animate-pulse" />
+            <span>CLINICAL WELLNESS SANCTUARY — 240 FPS SCENE</span>
           </div>
 
-          {/* Phase 2: Glide into Garden Suite (35% - 71%) */}
+          <div className="hidden md:flex items-center gap-6 text-[12px] font-sans text-[#1E3A34]/60">
+            <span className="flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5 text-[#489987]" /> 580+ Verified 5-Star Reviews</span>
+            <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-[#489987]" /> Mon-Fri: 7:30am - 6:00pm</span>
+          </div>
+        </div>
+
+        {/* Dynamic Text Stages */}
+        <div className="relative z-20 mx-auto max-w-[1440px] w-full px-6 md:px-10 my-auto pointer-events-none">
+          {/* Stage 1: 0.0 - 0.22 */}
           <div
-            className={`transition-all duration-700 transform ${
-              progressRatio >= 0.35 && progressRatio < 0.72
-                ? 'opacity-100 translate-y-0'
-                : 'opacity-0 translate-y-6 pointer-events-none absolute'
-            }`}
+            style={{ opacity: getStageOpacity(0.0, 0.22) }}
+            className="transition-opacity duration-300 max-w-2xl"
           >
-            <div className="bg-cf-alabaster/80 backdrop-blur-md px-6 py-6 sm:px-10 sm:py-8 rounded-3xl border border-cf-mist/80 shadow-sm inline-block max-w-xl mx-auto pointer-events-auto">
-              <span className="block text-xs uppercase tracking-[0.25em] font-semibold text-cf-gold mb-2 font-body">
-                Sensory Sanctuary &bull; Treatment Suites
-              </span>
-              <h2 className="text-3xl sm:text-4xl md:text-5xl font-display font-semibold text-cf-forest tracking-tight leading-[1.15]">
-                Quiet comfort, heated blankets, <br className="hidden sm:inline" />
-                <span>&amp; unhurried appointments.</span>
-              </h2>
-              <p className="mt-3 text-sm sm:text-base text-cf-slate max-w-md mx-auto font-normal font-body leading-relaxed">
-                Ergonomic leather seating overlooking peaceful wooded grounds. Slip on noise-cancelling headphones and truly unwind.
-              </p>
+            <div className="text-[12px] font-sans tracking-[0.2em] uppercase text-[#489987] font-semibold mb-3">
+              BIXBY & SOUTH TULSA, OK
             </div>
+            <h1 className="font-serif text-[42px] md:text-[68px] lg:text-[76px] leading-[0.92] tracking-[-0.03em] text-[#1E3A34]">
+              Where dental care feels like sanctuary.
+            </h1>
+            <p className="mt-4 text-[16px] md:text-[19px] text-[#4F615D] font-light max-w-lg leading-relaxed">
+              No cold clinic stress. Pure Scandinavian calm, warm sedation wellness, and gentle care for all generations.
+            </p>
           </div>
 
-          {/* Phase 3: Arrival at Founders (72% - 100%) */}
+          {/* Stage 2: 0.25 - 0.48 */}
           <div
-            className={`transition-all duration-700 transform ${
-              progressRatio >= 0.72
-                ? 'opacity-100 translate-y-0'
-                : 'opacity-0 translate-y-6 pointer-events-none absolute'
-            }`}
+            style={{ opacity: getStageOpacity(0.25, 0.48) }}
+            className="transition-opacity duration-300 max-w-2xl ml-auto text-right"
           >
-            <div className="bg-cf-alabaster/80 backdrop-blur-md px-6 py-6 sm:px-10 sm:py-8 rounded-3xl border border-cf-mist/80 shadow-sm inline-block max-w-xl mx-auto pointer-events-auto">
-              <span className="block text-xs uppercase tracking-[0.25em] font-semibold text-cf-gold mb-2 font-body">
-                Three Resident Founders
-              </span>
-              <h2 className="text-3xl sm:text-4xl md:text-5xl font-display font-semibold text-cf-forest tracking-tight leading-[1.15]">
-                Drs. Nauman, <br className="hidden sm:inline" />
-                <span>Standlee &amp; Sellmeyer.</span>
-              </h2>
-              <p className="mt-3 text-sm sm:text-base text-cf-slate max-w-md mx-auto font-normal font-body leading-relaxed">
-                Family dentistry without judgment, gentle pediatric adaptation, and warm conscious sedation options.
-              </p>
+            <div className="text-[12px] font-sans tracking-[0.2em] uppercase text-[#489987] font-semibold mb-3">
+              THREE DOCTORS • ONE FAMILY
+            </div>
+            <h2 className="font-serif text-[40px] md:text-[64px] lg:text-[72px] leading-[0.92] tracking-[-0.03em] text-[#1E3A34]">
+              Gentle hands.<br />
+              <span className="italic font-light opacity-80">Absolute precision.</span>
+            </h2>
+            <p className="mt-4 text-[16px] md:text-[19px] text-[#4F615D] font-light max-w-lg ml-auto leading-relaxed">
+              Dr. Angie Nauman, Dr. Rachel Standlee, and Dr. Meghan Sellmeyer — dedicated to restoring your smile with gentle care.
+            </p>
+          </div>
+
+          {/* Stage 3: 0.51 - 0.74 */}
+          <div
+            style={{ opacity: getStageOpacity(0.51, 0.74) }}
+            className="transition-opacity duration-300 max-w-2xl"
+          >
+            <div className="text-[12px] font-sans tracking-[0.2em] uppercase text-[#489987] font-semibold mb-3">
+              ZERO-ANXIETY SEDATION
+            </div>
+            <h2 className="font-serif text-[40px] md:text-[64px] lg:text-[72px] leading-[0.92] tracking-[-0.03em] text-[#1E3A34]">
+              Relax completely while we work.
+            </h2>
+            <p className="mt-4 text-[16px] md:text-[19px] text-[#4F615D] font-light max-w-lg leading-relaxed">
+              Heated contour chairs, noise-canceling headsets, and customizable sedation protocols that make appointments a breeze.
+            </p>
+          </div>
+
+          {/* Stage 4: 0.77 - 0.98 */}
+          <div
+            style={{ opacity: getStageOpacity(0.77, 0.98) }}
+            className="transition-opacity duration-300 max-w-2xl mx-auto text-center pointer-events-auto"
+          >
+            <div className="text-[12px] font-sans tracking-[0.2em] uppercase text-[#489987] font-semibold mb-3">
+              WELCOME TO CAREFREE HEALTH
+            </div>
+            <h2 className="font-serif text-[44px] md:text-[68px] lg:text-[76px] leading-[0.92] tracking-[-0.03em] text-[#1E3A34]">
+              Your smile starts here.
+            </h2>
+            <p className="mt-4 text-[16px] md:text-[19px] text-[#4F615D] font-light max-w-lg mx-auto leading-relaxed">
+              Accepting new family and cosmetic patients across Bixby, Broken Arrow, and South Tulsa.
+            </p>
+            <div className="mt-8 flex justify-center">
+              <button
+                ref={buttonRef}
+                onClick={() => {
+                  const cta = document.getElementById('contact');
+                  cta?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="group relative inline-flex items-center gap-4 bg-[#1E3A34] text-[#FAF9F6] rounded-full pl-8 pr-3 h-[58px] font-sans text-[13px] tracking-[0.14em] uppercase transition-colors hover:bg-[#142723]"
+              >
+                <span ref={buttonInnerRef} className="inline-flex items-center gap-4">
+                  Schedule Your Visit
+                  <span className="w-10 h-10 rounded-full bg-[#489987] text-[#FAF9F6] grid place-items-center group-hover:rotate-45 transition-transform duration-300">
+                    <ArrowRight className="w-4 h-4" />
+                  </span>
+                </span>
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Minimal Grounded Bar (Subtractive Restraint) */}
-        <div className="relative z-30 pb-6 px-6 max-w-3xl mx-auto w-full">
-          <div className="bg-cf-alabaster/95 backdrop-blur-md border border-cf-mist rounded-2xl p-4 sm:p-5 shadow-md flex items-center justify-between gap-4">
-            <div className="text-left font-body">
-              <p className="text-xs uppercase tracking-wider font-semibold text-cf-gold">
-                New Patient Welcome
-              </p>
-              <p className="text-sm font-medium text-cf-forest font-display">
-                Comprehensive exam, gentle cleaning &amp; personalized comfort plan
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3 shrink-0">
-              <a
-                href="https://www.carefamilydentistrybixby.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-cf-forest text-cf-alabaster text-xs font-semibold hover:bg-cf-forest/90 transition-all shadow-sm group"
-              >
-                <Calendar className="w-3.5 h-3.5 text-cf-gold" />
-                <span>Schedule Visit</span>
-                <ArrowRight className="w-3.5 h-3.5 text-cf-mist group-hover:translate-x-0.5 transition-transform" />
-              </a>
-            </div>
+        {/* Bottom Bar Indicator */}
+        <div className="relative z-20 mx-auto max-w-[1440px] w-full px-6 md:px-10 pb-8 flex items-center justify-between pointer-events-none">
+          <div className="text-[11px] font-sans tracking-widest uppercase text-[#1E3A34]/50">
+            Scroll to explore sanctuary
           </div>
-
-          {/* Quiet Scroll Cue */}
-          <div className="flex items-center justify-center gap-1.5 text-xs text-cf-slate/60 mt-2.5 font-body">
-            <span>Scroll to tour the sanctuary</span>
-            <ChevronDown className="w-3.5 h-3.5 animate-bounce text-cf-gold" />
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] font-mono text-[#1E3A34]/40">
+              FRAME {Math.min(Math.round(currentProgress * 239) + 1, 240)} / 240
+            </span>
+            <div className="w-24 h-1 bg-[#1E3A34]/10 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-[#489987] transition-all duration-75"
+                style={{ width: `${Math.round(currentProgress * 100)}%` }}
+              />
+            </div>
           </div>
         </div>
       </div>
