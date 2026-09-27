@@ -124,7 +124,7 @@ export const MagneticCTA: React.FC = () => {
         {/* Copyright & Disclaimer */}
         <div className="mt-20 pt-8 border-t border-[#1E3A34]/10 flex flex-col md:flex-row items-center justify-between text-[11px] text-[#4F615D] gap-4">
           <p>© {new Date().getFullYear()} Care Family Dentistry. All rights reserved.</p>
-          <p className="font-mono text-[#1E3A34]/40">BESPOKE ARCHITECTURE — 240 NEURAL FRAMES / META SOTA</p>
+          <p className="font-mono text-[#1E3A34]/60">CARE FAMILY DENTISTRY • BIXBY & SOUTH TULSA, OK</p>
         </div>
       </div>
     </footer>

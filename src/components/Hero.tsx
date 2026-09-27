@@ -208,7 +208,7 @@ export const Hero: React.FC = () => {
         <div className="relative z-20 mx-auto max-w-[1440px] w-full px-6 md:px-10 pt-24 flex items-center justify-between pointer-events-none">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#1E3A34]/5 backdrop-blur-md border border-[#1E3A34]/10 text-[11px] font-sans font-medium text-[#1E3A34]">
             <span className="w-2 h-2 rounded-full bg-[#489987] animate-pulse" />
-            <span>CLINICAL WELLNESS SANCTUARY — 240 FPS SCENE</span>
+            <span>GENTLE FAMILY & PEDIATRIC WELLNESS SANCTUARY</span>
           </div>
 
           <div className="hidden md:flex items-center gap-6 text-[12px] font-sans text-[#1E3A34]/60">
@@ -309,7 +309,7 @@ export const Hero: React.FC = () => {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-[11px] font-mono text-[#1E3A34]/40">
-              FRAME {Math.min(Math.round(currentProgress * 239) + 1, 240)} / 240
+              EXPLORE SANCTUARY
             </span>
             <div className="w-24 h-1 bg-[#1E3A34]/10 rounded-full overflow-hidden">
               <div
